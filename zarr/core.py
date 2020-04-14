@@ -1020,12 +1020,19 @@ class Array(object):
         else:
             check_array_shape('out', out, out_shape)
 
+        # Try out getitems method described in #536 Not for production use
+        # If there's a getitems method, use that to copy all the items into a dict, which
+        # will get used by _chunk_getitem instead of self.chunk_store
+        chunk_store = self.chunk_store
+        if hasattr(chunk_store, 'getitems'):
+            keys = [self._chunk_key(chunk_coords) for chunk_coords, _, _ in indexer]
+            chunk_store = dict(chunk_store.getitems(keys))
+
         # iterate over chunks
         for chunk_coords, chunk_selection, out_selection in indexer:
-
             # load chunk selection into output array
             self._chunk_getitem(chunk_coords, chunk_selection, out, out_selection,
-                                drop_axes=indexer.drop_axes, fields=fields)
+                                drop_axes=indexer.drop_axes, fields=fields, chunk_store=chunk_store)
 
         if out.shape:
             return out
@@ -1550,7 +1557,7 @@ class Array(object):
             self._chunk_setitem(chunk_coords, chunk_selection, chunk_value, fields=fields)
 
     def _chunk_getitem(self, chunk_coords, chunk_selection, out, out_selection,
-                       drop_axes=None, fields=None):
+                       drop_axes=None, fields=None, chunk_store=None):
         """Obtain part or whole of a chunk.
 
         Parameters
@@ -1581,9 +1588,11 @@ class Array(object):
         # obtain key for chunk
         ckey = self._chunk_key(chunk_coords)
 
+        if chunk_store is None:
+            chunk_store = self.chunk_store
         try:
             # obtain compressed data for chunk
-            cdata = self.chunk_store[ckey]
+            cdata = chunk_store[ckey]
 
         except KeyError:
             # chunk not initialized
